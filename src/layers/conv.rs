@@ -269,9 +269,16 @@ impl Conv2dLayer {
 
             let time = start_event.elapsed_ms(&end_event)?;
 
+            let output_flops = output_height
+                * output_width
+                * self.config.out_channels
+                * self.config.in_channels
+                * self.config.kernel_size.0
+                * self.config.kernel_size.1;
+
             println!(
-                "computed elements: {:}, block size: {:}, kernel time {:} ms",
-                output_size, block_size, time
+                "flops: {:}, block size: {:}, kernel time {:} ms",
+                output_flops, block_size, time
             );
 
             i = i * 2;
@@ -306,62 +313,42 @@ mod tests {
 
     #[test]
     fn test_conv2d_layer() -> Result<(), DriverError> {
-        // Initialize CUDA context
         let ctx = CudaContext::new(0)?;
         let stream = ctx.default_stream();
 
-        // Define convolution parameters
-        let batch_size = 32;
-        let in_channels = 64;
-        let out_channels = 64;
-        let input_height = 224;
-        let input_width = 224;
-        let kernel_size = 3;
+        let mut i = 16;
 
-        // println!("Initializing Conv2D layer...");
-        // println!(
-        //     "Input: {}x{}x{}x{}",
-        //     batch_size, in_channels, input_height, input_width
-        // );
-        // println!(
-        //     "Kernel: {}x{}x{}x{}",
-        //     out_channels, in_channels, kernel_size, kernel_size
-        // );
+        while i <= 512 {
+            let batch_size = 32;
+            let in_channels = i;
+            let out_channels = i;
+            let input_height = 112;
+            let input_width = 112;
+            let kernel_size = 3;
 
-        // Create layer configuration
-        let config = Conv2dConfig {
-            in_channels,
-            out_channels,
-            kernel_size: (kernel_size, kernel_size),
-            stride: (1, 1),
-            padding: (1, 1),
-            bias: true,
-        };
+            let config = Conv2dConfig {
+                in_channels,
+                out_channels,
+                kernel_size: (kernel_size, kernel_size),
+                stride: (1, 1),
+                padding: (1, 1),
+                bias: true,
+            };
 
-        // Create random weights and bias
-        let weight_data =
-            create_random_tensor(out_channels * in_channels * kernel_size * kernel_size);
-        let bias_data = create_random_tensor(out_channels);
+            let weight_data =
+                create_random_tensor(out_channels * in_channels * kernel_size * kernel_size);
+            let bias_data = create_random_tensor(out_channels);
 
-        // Create convolution layer
-        let conv_layer = Conv2dLayer::new(&ctx, config, weight_data, Some(bias_data))?;
+            let conv_layer = Conv2dLayer::new(&ctx, config, weight_data, Some(bias_data))?;
 
-        // Create input tensor
-        let input_data =
-            create_random_tensor(batch_size * in_channels * input_height * input_width);
-        let input_tensor = stream.memcpy_stod(&input_data)?;
+            let input_data =
+                create_random_tensor(batch_size * in_channels * input_height * input_width);
+            let input_tensor = stream.memcpy_stod(&input_data)?;
 
-        // println!("Running forward pass...");
-
-        // Forward pass
-        // let start = std::time::Instant::now();
-        let output =
             conv_layer.forward(&ctx, &input_tensor, batch_size, input_height, input_width)?;
-        // let forward_time = start.elapsed();
 
-        // Calculate output dimensions
-
-        // println!("Forward pass completed in {:?}", forward_time);
+            i = i * 2;
+        }
 
         Ok(())
     }

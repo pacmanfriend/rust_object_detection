@@ -28,13 +28,13 @@ impl GpuInfo {
     pub fn new(nvml: &Nvml) -> Self {
         let cuda_available = tch::Cuda::is_available();
 
-        if !cuda_available {
-            return GpuInfo {
-                cuda_available: false,
-                gpu_count: 0,
-                gpus: Vec::new(),
-            };
-        }
+        // if !cuda_available {
+        //     return GpuInfo {
+        //         cuda_available: false,
+        //         gpu_count: 0,
+        //         gpus: Vec::new(),
+        //     };
+        // }
 
         let device_count = match nvml.device_count() {
             Ok(count) => count,
@@ -69,9 +69,9 @@ impl GpuInfo {
         let name = device.name().unwrap_or_else(|_| format!("GPU {}", index));
 
         let memory_info = device.memory_info().ok()?;
-        let memory_total = memory_info.total;
-        let memory_used = memory_info.used;
-        let memory_free = memory_info.free;
+        let memory_total = memory_info.total / 1024 / 1024;
+        let memory_used = memory_info.used / 1024 / 1024;
+        let memory_free = memory_info.free / 1024 / 1024;
         let memory_usage_percent = (memory_used as f32 / memory_total as f32) * 100.0;
 
         let temperature = device

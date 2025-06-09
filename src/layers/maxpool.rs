@@ -204,10 +204,8 @@ mod tests {
 
         let input_gpu = stream.memcpy_stod(&input_data)?;
 
-        // Forward pass
-        let output_gpu = maxpool.forward(&ctx, &input_gpu, batch_size, channels, height, width)?;
+        maxpool.forward(&ctx, &input_gpu, batch_size, channels, height, width)?;
 
-        // assert_eq!(output_data, expected);
         println!("MaxPool2D test passed! ");
 
         Ok(())

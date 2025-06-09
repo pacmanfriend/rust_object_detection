@@ -183,7 +183,6 @@ impl DenseLayer {
         let module = ctx.load_module(ptx)?;
         let kernel = module.load_function("dense_forward")?;
 
-        // Конфигурация запуска: 2D grid для batch_size x output_size
         let block_size = 16;
         let grid_x = (self.output_size + block_size - 1) / block_size;
         let grid_y = (batch_size + block_size - 1) / block_size;
@@ -248,21 +247,18 @@ mod tests {
 
         // Параметры слоя
         let batch_size = 1000;
-        let input_size = 1000; // например, 28x28 изображение
+        let input_size = 1000;
         let hidden_size = 1000;
 
         // let total_input_size = batch_size * input_size * hidden_size;
         // println!("Total input size: {}", total_input_size);
 
-        // Создаем слои
         let layer1 = DenseLayer::new(&ctx, input_size, hidden_size, Activation::ReLU)?;
-        // let layer2 = DenseLayer::new(&ctx, hidden_size, output_size, Activation::Linear)?;
 
-        // Создаем тестовые данные
         let input_data = create_random_tensor(batch_size * input_size);
         let input = stream.memcpy_stod(&input_data)?;
 
-        let output_dev = layer1.forward(&ctx, &input, batch_size)?;
+        layer1.forward(&ctx, &input, batch_size)?;
 
         Ok(())
     }
