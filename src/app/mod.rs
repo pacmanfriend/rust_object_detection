@@ -7,9 +7,9 @@ use axum::{
     routing::{get, post},
 };
 use nvml_wrapper::Nvml;
-use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, sync::Arc};
-use tch::{Device, Kind, Tensor, nn, vision};
+use serde::Serialize;
+use std::sync::Arc;
+use tch::Device;
 use tower_http::cors::CorsLayer;
 use tracing::{info, warn};
 
@@ -17,20 +17,15 @@ mod gpu_info;
 mod image_utils;
 mod vgg;
 
-use crate::app::{gpu_info::GpuInfo, image_utils::preprocess_image, vgg::VGG19Model};
+use crate::app::vgg::ImagenetPredict;
+use crate::app::{gpu_info::GpuInfo, image_utils::save_image, vgg::VGG19Model};
 
 #[derive(Debug, Serialize)]
 struct PredictionResponse {
     predicted_class: String,
     confidence: f64,
-    top_5_predictions: Vec<ClassPrediction>,
+    predictions: Vec<ImagenetPredict>,
     gpu_info: GpuInfo,
-}
-
-#[derive(Debug, Serialize)]
-struct ClassPrediction {
-    class_name: String,
-    confidence: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -51,7 +46,6 @@ struct AppState {
     nvml: Arc<Nvml>,
 }
 
-// #[tokio::main]
 pub async fn start_app() -> Result<()> {
     // Инициализация логирования
     tracing_subscriber::fmt::init();
@@ -80,11 +74,11 @@ pub async fn start_app() -> Result<()> {
     // Загрузка имен классов ImageNet
     let class_names = Arc::new(load_imagenet_classes());
 
-    let state = AppState {
+    let state = Arc::new(AppState {
         model,
         class_names,
         nvml,
-    };
+    });
 
     // Создание маршрутов
     let app = Router::new()
@@ -95,15 +89,15 @@ pub async fn start_app() -> Result<()> {
         .layer(CorsLayer::permissive())
         .with_state(state);
 
-    info!("Сервер запускается на http://0.0.0.0:3000");
+    info!("Сервер запускается на http://127.0.0.1:8000");
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:8000").await?;
     axum::serve(listener, app).await?;
 
     Ok(())
 }
 
-async fn health_check(State(state): State<AppState>) -> Json<HealthResponse> {
+async fn health_check(State(state): State<Arc<AppState>>) -> Json<HealthResponse> {
     let gpu_info = GpuInfo::new(&state.nvml);
     Json(HealthResponse {
         status: "OK".to_string(),
@@ -111,12 +105,12 @@ async fn health_check(State(state): State<AppState>) -> Json<HealthResponse> {
     })
 }
 
-async fn gpu_info_endpoint(State(state): State<AppState>) -> Json<GpuInfo> {
+async fn gpu_info_endpoint(State(state): State<Arc<AppState>>) -> Json<GpuInfo> {
     Json(GpuInfo::new(&state.nvml))
 }
 
 async fn predict_image(
-    State(state): State<AppState>,
+    State(state): State<Arc<AppState>>,
     mut multipart: Multipart,
 ) -> Result<Json<PredictionResponse>, (StatusCode, Json<ErrorResponse>)> {
     let mut image_data: Option<Vec<u8>> = None;
@@ -139,6 +133,7 @@ async fn predict_image(
                     }),
                 )
             })?;
+
             image_data = Some(data.to_vec());
             break;
         }
@@ -153,8 +148,7 @@ async fn predict_image(
         )
     })?;
 
-    // Предобработка изображения
-    let tensor = preprocess_image(&image_data, state.model.device()).map_err(|e| {
+    let image_path = save_image(&image_data).map_err(|e| {
         (
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
@@ -163,8 +157,7 @@ async fn predict_image(
         )
     })?;
 
-    // Предсказание
-    let predictions = state.model.predict(&tensor).map_err(|e| {
+    let predictions = state.model.predict_imagenet(image_path).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse {
@@ -173,34 +166,8 @@ async fn predict_image(
         )
     })?;
 
-    // Получение топ-5 предсказаний
-    let top_5_indices = predictions.argsort(-1, true).select(1, 0).slice(1, 0, 5, 1);
-
-    let top_5_probs = predictions
-        .softmax(-1, Kind::Float)
-        .gather(1, &top_5_indices, false)
-        .squeeze_dim(0);
-
-    let top_5_indices: Vec<i64> = top_5_indices.squeeze_dim(0).into();
-    let top_5_probs: Vec<f64> = top_5_probs.into();
-
-    let mut top_5_predictions = Vec::new();
-    for (i, &prob) in top_5_probs.iter().enumerate() {
-        let class_idx = top_5_indices[i] as usize;
-        let class_name = state
-            .class_names
-            .get(class_idx)
-            .unwrap_or(&format!("Class {}", class_idx))
-            .clone();
-
-        top_5_predictions.push(ClassPrediction {
-            class_name,
-            confidence: prob,
-        });
-    }
-
-    let predicted_class = top_5_predictions[0].class_name.clone();
-    let confidence = top_5_predictions[0].confidence;
+    let predicted_class = predictions[0].class.clone();
+    let confidence = predictions[0].probability;
 
     // Получение информации о GPU
     let gpu_info = GpuInfo::new(&state.nvml);
@@ -208,7 +175,7 @@ async fn predict_image(
     Ok(Json(PredictionResponse {
         predicted_class,
         confidence,
-        top_5_predictions,
+        predictions,
         gpu_info,
     }))
 }

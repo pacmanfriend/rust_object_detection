@@ -2,7 +2,7 @@ use anyhow::{Result, anyhow};
 use image::{ImageBuffer, Rgb, RgbImage};
 use tch::{Device, Kind, Tensor};
 
-pub fn preprocess_image(image_data: &[u8], device: Device) -> Result<Tensor> {
+pub fn save_image(image_data: &[u8]) -> Result<&str> {
     // Загрузка изображения из байтов
     let img = image::load_from_memory(image_data)
         .map_err(|e| anyhow!("Не удалось загрузить изображение: {}", e))?;
@@ -10,20 +10,11 @@ pub fn preprocess_image(image_data: &[u8], device: Device) -> Result<Tensor> {
     // Конвертация в RGB если необходимо
     let rgb_img = img.to_rgb8();
 
-    // Изменение размера до 224x224 (стандартный размер для VGG)
-    let resized =
-        image::imageops::resize(&rgb_img, 224, 224, image::imageops::FilterType::Lanczos3);
+    let path = "image.jpg";
 
-    // Конвертация в тензор
-    let tensor = image_to_tensor(&resized, device)?;
+    rgb_img.save(path)?;
 
-    // Нормализация ImageNet
-    let normalized = normalize_imagenet(tensor)?;
-
-    // Добавление batch dimension
-    let batched = normalized.unsqueeze(0);
-
-    Ok(batched)
+    Ok(path)
 }
 
 fn image_to_tensor(img: &RgbImage, device: Device) -> Result<Tensor> {

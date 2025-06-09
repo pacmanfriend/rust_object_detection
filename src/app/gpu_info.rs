@@ -79,7 +79,7 @@ impl GpuInfo {
             .ok();
 
         let power_usage = device.power_usage().ok();
-        let power_limit = device.max_power_limit().ok();
+        let power_limit = device.power_management_limit().ok();
 
         let utilization = device.utilization_rates().ok();
         let (utilization_gpu, utilization_memory) = if let Some(util) = utilization {
